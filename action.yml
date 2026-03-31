@@ -49,6 +49,10 @@ inputs:
     description: 'Minimum accessibility score'
     required: false
     default: 0.9
+  resolve_redirects:
+    description: 'Resolve store domain redirects and use cookie-based preview to eliminate redirect penalties from Lighthouse scores.'
+    required: false
+    default: 'false'
 runs:
   using: 'docker'
   image: 'Dockerfile'
