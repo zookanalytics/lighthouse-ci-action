@@ -35,6 +35,9 @@
 [[ -n "$INPUT_LHCI_MIN_SCORE_PERFORMANCE" ]]   && export LHCI_MIN_SCORE_PERFORMANCE="$INPUT_LHCI_MIN_SCORE_PERFORMANCE"
 [[ -n "$INPUT_LHCI_MIN_SCORE_ACCESSIBILITY" ]] && export LHCI_MIN_SCORE_ACCESSIBILITY="$INPUT_LHCI_MIN_SCORE_ACCESSIBILITY"
 
+# Redirect resolution
+[[ -n "$INPUT_RESOLVE_REDIRECTS" ]] && export RESOLVE_REDIRECTS="$INPUT_RESOLVE_REDIRECTS"
+
 # Add global node bin to PATH (from the Dockerfile)
 export PATH="$PATH:$npm_config_prefix/bin"
 
@@ -231,8 +234,31 @@ else
   log "Using $collection_handle"
 fi
 
-# Disable redirects + preview bar
-query_string="?preview_theme_id=${preview_id}&_fd=0&pb=0"
+# When resolve_redirects is enabled:
+# 1. Resolve the store's final domain (e.g. myshopify.com -> www.customdomain.com)
+#    to eliminate the domain redirect penalty
+# 2. Use the preview cookie (set by puppeteer) instead of ?preview_theme_id in the URL
+#    to eliminate the preview redirect penalty
+if [[ "${RESOLVE_REDIRECTS:-false}" == "true" ]]; then
+  step "Resolving store redirects"
+  set +e
+  resolved_url="$(curl -sS -L -o /dev/null -w '%{url_effective}' "$host/" 2>/dev/null)"
+  set -e
+  resolved_host="$(echo "$resolved_url" | grep -oE 'https://[^/?]+')"
+  if [[ -n "$resolved_host" && "$resolved_host" != "$host" ]]; then
+    log "Resolved redirect chain: $host -> $resolved_host"
+    lighthouse_host="$resolved_host"
+  else
+    log "No redirect detected, using original host: $host"
+    lighthouse_host="$host"
+  fi
+  query_string="?pb=0"
+  log "Using cookie-based preview (no preview_theme_id in URLs)"
+else
+  lighthouse_host="$host"
+  # Disable redirects + preview bar
+  query_string="?preview_theme_id=${preview_id}&_fd=0&pb=0"
+fi
 min_score_performance="${LHCI_MIN_SCORE_PERFORMANCE:-0.6}"
 min_score_accessibility="${LHCI_MIN_SCORE_ACCESSIBILITY:-0.9}"
 
@@ -246,9 +272,9 @@ cat <<- EOF > lighthouserc.yml
 ci:
   collect:
     url:
-      - "$host/$query_string"
-      - "$host/products/$product_handle$query_string"
-      - "$host/collections/$collection_handle$query_string"
+      - "$lighthouse_host/$query_string"
+      - "$lighthouse_host/products/$product_handle$query_string"
+      - "$lighthouse_host/collections/$collection_handle$query_string"
     puppeteerScript: './setPreviewCookies.js'
     puppeteerLaunchOptions:
       args:
